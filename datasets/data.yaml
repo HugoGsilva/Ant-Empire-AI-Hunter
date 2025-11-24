@@ -1,0 +1,9 @@
+# O ponto (.) significa: "A raiz é a pasta onde este arquivo está"
+path: C:/Users/pimbo/IA BURRA/Ant-Empire-AI-Hunter/datasets
+train: train/images
+val: valid/images
+test: test/images
+
+# Classes
+nc: 2
+names: ['Enemy', 'Mount']
