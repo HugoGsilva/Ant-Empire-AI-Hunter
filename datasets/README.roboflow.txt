@@ -1,8 +1,8 @@
 
-Ant-Empire-AI-Hunter - v1 Roboflow Instant 1 [Eval]
+Ant-Empire-AI-Hunter - v3 2025-11-24 11:39am
 ==============================
 
-This dataset was exported via roboflow.com on November 24, 2025 at 7:56 AM GMT
+This dataset was exported via roboflow.com on November 24, 2025 at 2:42 PM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,12 +17,14 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 55 images.
+The dataset includes 205 images.
 Enemy are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
 * Auto-orientation of pixel data (with EXIF-orientation stripping)
 
-No image augmentation techniques were applied.
+The following augmentation was applied to create 3 versions of each source image:
+* 50% probability of horizontal flip
+* Random brigthness adjustment of between -15 and +15 percent
 
 

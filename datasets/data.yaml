@@ -1,9 +1,16 @@
-# O ponto (.) significa: "A raiz é a pasta onde este arquivo está"
 path: C:/Users/pimbo/IA BURRA/Ant-Empire-AI-Hunter/datasets
+
+# Pastas relativas (dentro do caminho acima)
 train: train/images
 val: valid/images
 test: test/images
 
-# Classes
-nc: 2
-names: ['Enemy', 'Mount']
+nc: 11
+names: ['Acorn', 'Banana', 'Blueberry', 'Enemy', 'Melon', 'Mount', 'Mushroom', 'Orange', 'Strawberry', 'apple', 'pine']
+
+roboflow:
+  workspace: best-projects
+  project: ant-empire-ai-hunter-2pxfw
+  version: 3
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/best-projects/ant-empire-ai-hunter-2pxfw/dataset/3
