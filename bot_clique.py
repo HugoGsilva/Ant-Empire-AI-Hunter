@@ -201,7 +201,7 @@ def clique_clean(x, y, largura_tela, altura_tela):
 # --- CONFIGURAÇÕES DO BOT ---
 # ==============================================================================
 
-MODEL_PATH = "runs/detect/train7/weights/best.pt" 
+MODEL_PATH = "runs/detect/train10/weights/best.pt" 
 CONFIDENCE = 0.5
 
 # Tempos (em segundos)
