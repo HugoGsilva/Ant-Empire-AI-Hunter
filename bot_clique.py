@@ -207,8 +207,15 @@ CONFIDENCE = 0.5
 # Tempos (em segundos)
 INTERVALO_CLIQUE = 2.5   # Tempo suficiente para ele andar até o bicho
 INTERVALO_GIRAR = 5.0    
+INTERVALO_ENTRE_GIROS = 1.5  # Tempo entre cada giro ao procurar
+TEMPO_ESPERA_ANDAR = 10.0  # Tempo para aguardar o personagem terminar de andar após clicar
 
-TECLA_GIRAR = '.' 
+TECLA_GIRAR = '.'
+
+# Estados do bot
+ESTADO_PROCURANDO_ENEMY = "procurando_enemy"
+ESTADO_COLETANDO_BLUEBERRY = "coletando_blueberry"
+ESTADO_IDLE = "idle" 
 
 # Resolução será detectada automaticamente
 LARGURA = None
@@ -262,6 +269,13 @@ def main():
 
     ultimo_tempo_clique = 0
     ultimo_tempo_girar = 0
+    tempo_ultimo_clique_alvo = 0  # Controle para esperar após clicar em qualquer alvo (enemy ou blueberry)
+    
+    # Controle de estado para blueberries
+    estado_atual = ESTADO_IDLE
+    giros_realizados = 0
+    ultima_blueberry = None  # Guarda a última blueberry encontrada
+    tempo_inicio_procura = 0
 
     while True:
         if keyboard.is_pressed('q'):
@@ -274,8 +288,11 @@ def main():
         results = model(frame, conf=CONFIDENCE, verbose=False)
 
         inimigo_encontrado = False
+        blueberry_encontrada = False
         melhor_alvo = None
+        melhor_blueberry = None
         melhor_score = float('inf')
+        melhor_score_blueberry = float('inf')
         deteccoes_para_overlay = []  # Para enviar ao overlay
         
         # Centro da tela para cálculo de prioridade
@@ -286,9 +303,10 @@ def main():
             for box in boxes:
                 cls = int(box.cls[0])
                 conf = float(box.conf[0])
+                classe_nome = model.names[cls]
                 
-                # Filtra apenas inimigos com confiança mínima de 0.6
-                if model.names[cls] == 'Enemy' and conf >= 0.6:
+                # Filtra inimigos com confiança mínima de 0.6
+                if classe_nome == 'Enemy' and conf >= 0.6:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     
                     # Adiciona para o overlay
@@ -313,10 +331,36 @@ def main():
                         melhor_score = score
                         melhor_alvo = box
                         inimigo_encontrado = True
+                
+                # Filtra blueberries com confiança mínima de 0.5
+                elif classe_nome == 'Blueberry' and conf >= 0.5:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    
+                    # Adiciona para o overlay com cor diferente
+                    deteccoes_para_overlay.append((x1, y1, x2, y2, conf))
+                    
+                    # Calcula centro da blueberry
+                    centro_blueberry_x = (x1 + x2) / 2
+                    centro_blueberry_y = (y1 + y2) / 2
+                    
+                    # Calcula distância do centro da tela
+                    distancia = np.sqrt((centro_blueberry_x - centro_tela_x)**2 + 
+                                      (centro_blueberry_y - centro_tela_y)**2)
+                    
+                    # Prioriza blueberries mais próximas
+                    if distancia < melhor_score_blueberry:
+                        melhor_score_blueberry = distancia
+                        melhor_blueberry = box
+                        blueberry_encontrada = True
 
         tempo_atual = time.time()
 
+        # PRIORIDADE 1: Inimigos (ataca) - SEMPRE prioriza
         if inimigo_encontrado and melhor_alvo is not None:
+            # Reset estado se estava procurando
+            estado_atual = ESTADO_IDLE
+            giros_realizados = 0
+            
             x1, y1, x2, y2 = melhor_alvo.xyxy[0].cpu().numpy()
             
             # --- OTIMIZAÇÃO: MIRA NO CENTRO-BAIXO ---
@@ -332,34 +376,116 @@ def main():
             if not USAR_OVERLAY:
                 cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
                 cv2.circle(frame, (centro_x, centro_y), 6, (0, 0, 255), -1)
-                
-                # Mostra confiança da detecção
-                conf_atual = float(melhor_alvo.conf[0])
-                cv2.putText(frame, f"{conf_atual:.2f}", (int(x1), int(y1) - 10),
+                cv2.putText(frame, "ENEMY", (int(x1), int(y1) - 10),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            if tempo_atual - ultimo_tempo_clique >= INTERVALO_CLIQUE:
-                # Chama a função otimizada
+            # Verifica se já passou tempo suficiente desde o último clique
+            if tempo_atual - tempo_ultimo_clique_alvo >= TEMPO_ESPERA_ANDAR:
+                # Clique direito para atacar
                 clique_clean(centro_x, centro_y, LARGURA, ALTURA)
-                ultimo_tempo_clique = tempo_atual
+                tempo_ultimo_clique_alvo = tempo_atual
+                print(f">>> Atacando inimigo! Aguardando {TEMPO_ESPERA_ANDAR}s...")
             else:
-                # HUD Minimalista (só na janela mini)
+                # HUD mostrando tempo restante
                 if not USAR_OVERLAY:
-                    t_restante = round(INTERVALO_CLIQUE - (tempo_atual - ultimo_tempo_clique), 1)
-                    cv2.putText(frame, f"{t_restante}s", (centro_x + 10, centro_y), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    t_restante = round(TEMPO_ESPERA_ANDAR - (tempo_atual - tempo_ultimo_clique_alvo), 1)
+                    cv2.putText(frame, f"Cooldown: {t_restante}s", (centro_x + 10, centro_y), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
 
+        # PRIORIDADE 2: Blueberries (sistema de busca inteligente)
+        elif blueberry_encontrada and melhor_blueberry is not None:
+            x1, y1, x2, y2 = melhor_blueberry.xyxy[0].cpu().numpy()
+            
+            # Centro da blueberry
+            centro_x = int((x1 + x2) / 2)
+            centro_y = int((y1 + y2) / 2)
+            
+            # Guarda referência da blueberry
+            ultima_blueberry = (centro_x, centro_y)
+            
+            # Atualiza overlay com blueberry atual
+            if USAR_OVERLAY and overlay:
+                overlay.atualizar(deteccoes_para_overlay, (centro_x, centro_y))
+
+            # Desenha Debug na janela mini
+            if not USAR_OVERLAY:
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
+                cv2.circle(frame, (centro_x, centro_y), 6, (255, 0, 255), -1)
+                estado_texto = f"BLUEBERRY [{estado_atual}]"
+                cv2.putText(frame, estado_texto, (int(x1), int(y1) - 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
+            # MÁQUINA DE ESTADOS
+            if estado_atual == ESTADO_IDLE or estado_atual == ESTADO_COLETANDO_BLUEBERRY:
+                # Clica na blueberry e inicia busca por enemies
+                if tempo_atual - tempo_ultimo_clique_alvo >= TEMPO_ESPERA_ANDAR:
+                    clique_clean(centro_x, centro_y, LARGURA, ALTURA)
+                    tempo_ultimo_clique_alvo = tempo_atual  # Marca o momento do clique
+                    estado_atual = ESTADO_PROCURANDO_ENEMY
+                    giros_realizados = 0
+                    tempo_inicio_procura = tempo_atual
+                    print(f">>> Clicou na blueberry, aguardando {TEMPO_ESPERA_ANDAR}s para personagem andar...")
+                else:
+                    # HUD Minimalista
+                    if not USAR_OVERLAY:
+                        t_restante = round(TEMPO_ESPERA_ANDAR - (tempo_atual - tempo_ultimo_clique_alvo), 1)
+                        cv2.putText(frame, f"Cooldown: {t_restante}s", (centro_x + 10, centro_y), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+            
+            elif estado_atual == ESTADO_PROCURANDO_ENEMY:
+                # Já clicou na blueberry, agora gira 2x procurando enemies
+                # (Esse estado será processado na próxima iteração quando não achar a blueberry no centro)
+                pass
+
+        # PRIORIDADE 3: Sem alvo visível
         else:
             # Atualiza overlay sem alvo
             if USAR_OVERLAY and overlay:
                 overlay.atualizar(deteccoes_para_overlay, None)
+            
+            # Se está no modo de procura após clicar na blueberry
+            if estado_atual == ESTADO_PROCURANDO_ENEMY:
+                # Aguarda 10 segundos após clicar na blueberry antes de começar a girar
+                tempo_desde_clique = tempo_atual - tempo_ultimo_clique_alvo
                 
-            if tempo_atual - ultimo_tempo_girar >= INTERVALO_GIRAR:
-                print("Sem alvo. Girando...")
-                keyboard.press(TECLA_GIRAR)
-                time.sleep(0.2)
-                keyboard.release(TECLA_GIRAR)
-                ultimo_tempo_girar = tempo_atual
+                if tempo_desde_clique < TEMPO_ESPERA_ANDAR:
+                    # Ainda esperando o personagem terminar de andar
+                    tempo_restante = TEMPO_ESPERA_ANDAR - tempo_desde_clique
+                    if not USAR_OVERLAY:
+                        cv2.putText(frame, f"Aguardando andar: {tempo_restante:.1f}s", 
+                                   (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+                    # Não faz nada, apenas aguarda
+                    pass
+                
+                elif giros_realizados < 2:
+                    # Já esperou 10s, agora pode girar
+                    if tempo_atual - ultimo_tempo_girar >= INTERVALO_ENTRE_GIROS:
+                        print(f">>> Procurando enemies... Giro {giros_realizados + 1}/2")
+                        keyboard.press(TECLA_GIRAR)
+                        time.sleep(0.2)
+                        keyboard.release(TECLA_GIRAR)
+                        ultimo_tempo_girar = tempo_atual
+                        giros_realizados += 1
+                        
+                        # Se completou 2 giros e tem blueberry guardada, volta a coletar
+                        if giros_realizados >= 2:
+                            if ultima_blueberry is not None:
+                                print(">>> Nenhum inimigo encontrado após 2 giros. Voltando para blueberry...")
+                                estado_atual = ESTADO_COLETANDO_BLUEBERRY
+                            else:
+                                estado_atual = ESTADO_IDLE
+            
+            # Modo normal: sem blueberry e sem estar procurando
+            elif estado_atual != ESTADO_PROCURANDO_ENEMY:
+                estado_atual = ESTADO_IDLE
+                giros_realizados = 0
+                
+                if tempo_atual - ultimo_tempo_girar >= INTERVALO_GIRAR:
+                    print(">>> Sem alvo. Girando...")
+                    keyboard.press(TECLA_GIRAR)
+                    time.sleep(0.2)
+                    keyboard.release(TECLA_GIRAR)
+                    ultimo_tempo_girar = tempo_atual
 
         # --- MODO VISUALIZAÇÃO ---
         # Tamanho configurável (ajuste o valor abaixo)
